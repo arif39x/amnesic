@@ -18,11 +18,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     watchdog::secure_launch(|| {
         namespace::isolate_environment();
         memory::lock_memory().map_err(|e| format!("{:?}", e))?;
-        seccomp::apply_filters();
+        seccomp::enforce_syscall_boundaries();
         signals::install_signal_handlers();
         let _session_key = SecureSecret::new([0x39u8; 32]);
 
-        println!("{}", obfstr!("kr-see: Secure Environment Active:"));
+        println!("{}", obfstr!("brzkh: Secure Environment Active:"));
         if let Err(e) = run_shell() {
             eprintln!("[!] Shell Error: {}", e);
             shutdown::secure_shutdown();
@@ -36,7 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn run_shell() -> Result<(), Box<dyn std::error::Error>> {
     loop {
-        let command = input::secure_prompt(obfstr!("kr-see $"));
+        let command = input::secure_prompt(obfstr!("bzk $"));
 
         match command.as_str() {
             c if c == obfstr!("status") => {

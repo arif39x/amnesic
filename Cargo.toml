@@ -1,5 +1,5 @@
 [package]
-name = "kr-see"
+name = "brzkh"
 version = "0.1.0"
 edition = "2021"
 
@@ -15,9 +15,9 @@ obfstr = "0.4"
 subtle = "2.4"
 
 [profile.release]
-panic = "abort"    
-lto = "fat"        
-codegen-units = 1  
-strip = "symbols"   
+panic = "abort"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
 overflow-checks = true
-opt-level = "z"    
+opt-level = "z"

@@ -1,31 +1,75 @@
-use libseccomp::{ScmpFilterContext, ScmpAction, ScmpSyscall};
+use libseccomp::{ScmpAction, ScmpFilterContext, ScmpSyscall};
 
-pub fn apply_filters() {
+pub fn enforce_syscall_boundaries() {
     println!("[*] Initializing Seccomp Prison...");
 
-    let mut ctx = ScmpFilterContext::new_filter(ScmpAction::Trap)
-        .expect("Failed to initialize Seccomp filter");
+    let mut isolation_context = ScmpFilterContext::new_filter(ScmpAction::Trap)
+        .expect("Isolation initialization failed");
 
-    const ALLOWED_SYSCALLS: &[i64] = &[
-        libc::SYS_read, libc::SYS_write, libc::SYS_writev, libc::SYS_openat, libc::SYS_close, libc::SYS_exit_group, libc::SYS_exit,
-        libc::SYS_brk, libc::SYS_mmap, libc::SYS_munmap, libc::SYS_mprotect, libc::SYS_mlockall, libc::SYS_madvise, libc::SYS_rseq,
-        libc::SYS_fstat, libc::SYS_newfstatat, libc::SYS_statx, libc::SYS_lseek, libc::SYS_ioctl, libc::SYS_fcntl,
-        libc::SYS_clone, libc::SYS_clone3, libc::SYS_set_robust_list, libc::SYS_futex, libc::SYS_set_tid_address, libc::SYS_tgkill, libc::SYS_gettid,
-        libc::SYS_nanosleep, libc::SYS_rt_sigreturn, libc::SYS_rt_sigaction, libc::SYS_sigaltstack, libc::SYS_rt_sigprocmask,
-        libc::SYS_rt_sigsuspend, 
-        libc::SYS_getrandom, libc::SYS_prlimit64, libc::SYS_getuid, libc::SYS_getgid, libc::SYS_geteuid, libc::SYS_getegid,
-        libc::SYS_ptrace, 
-        libc::SYS_poll, libc::SYS_ppoll, libc::SYS_select, libc::SYS_pselect6, libc::SYS_epoll_pwait,
-        libc::SYS_getpgrp, libc::SYS_getpid, libc::SYS_getppid, libc::SYS_arch_prctl, libc::SYS_sched_getaffinity,
+    const PERMITTED_SYSTEM_CALLS: &[i32] = &[
+        libc::SYS_read as i32,
+        libc::SYS_write as i32,
+        libc::SYS_writev as i32,
+        libc::SYS_open as i32,
+        libc::SYS_openat as i32,
+        libc::SYS_close as i32,
+        libc::SYS_exit_group as i32,
+        libc::SYS_exit as i32,
+        libc::SYS_brk as i32,
+        libc::SYS_mmap as i32,
+        libc::SYS_munmap as i32,
+        libc::SYS_mremap as i32,
+        libc::SYS_mprotect as i32,
+        libc::SYS_mlockall as i32,
+        libc::SYS_munlockall as i32,
+        libc::SYS_madvise as i32,
+        libc::SYS_rseq as i32,
+        libc::SYS_fstat as i32,
+        libc::SYS_newfstatat as i32,
+        libc::SYS_statx as i32,
+        libc::SYS_lseek as i32,
+        libc::SYS_ioctl as i32,
+        libc::SYS_fcntl as i32,
+        libc::SYS_clone as i32,
+        libc::SYS_clone3 as i32,
+        libc::SYS_set_robust_list as i32,
+        libc::SYS_futex as i32,
+        libc::SYS_set_tid_address as i32,
+        libc::SYS_tgkill as i32,
+        libc::SYS_gettid as i32,
+        libc::SYS_nanosleep as i32,
+        libc::SYS_rt_sigreturn as i32,
+        libc::SYS_rt_sigaction as i32,
+        libc::SYS_sigaltstack as i32,
+        libc::SYS_rt_sigprocmask as i32,
+        libc::SYS_rt_sigsuspend as i32,
+        libc::SYS_getrandom as i32,
+        libc::SYS_prlimit64 as i32,
+        libc::SYS_getuid as i32,
+        libc::SYS_getgid as i32,
+        libc::SYS_geteuid as i32,
+        libc::SYS_getegid as i32,
+        libc::SYS_ptrace as i32,
+        libc::SYS_poll as i32,
+        libc::SYS_ppoll as i32,
+        libc::SYS_select as i32,
+        libc::SYS_pselect6 as i32,
+        libc::SYS_epoll_pwait as i32,
+        libc::SYS_getpgrp as i32,
+        libc::SYS_getpid as i32,
+        libc::SYS_getppid as i32,
+        libc::SYS_arch_prctl as i32,
+        libc::SYS_sched_getaffinity as i32,
     ];
 
-    for &syscall_nr in ALLOWED_SYSCALLS {
-        let syscall = ScmpSyscall::from(syscall_nr as i32);
-        ctx.add_rule(ScmpAction::Allow, syscall)
-            .unwrap_or_else(|_| panic!("Failed to allow syscall: {}", syscall_nr));
+    for &system_call_identifier in PERMITTED_SYSTEM_CALLS {
+        let kernel_syscall = ScmpSyscall::from(system_call_identifier);
+        isolation_context
+            .add_rule(ScmpAction::Allow, kernel_syscall)
+            .unwrap_or_else(|_| panic!("Failed to allow syscall ID: {}", system_call_identifier));
     }
 
-    ctx.load().expect("Failed to load Seccomp filter into Kernel");
+    isolation_context.load().expect("Kernel context switch failed");
 
     println!("[*] Seccomp Prison: ACTIVE ");
 }
