@@ -1,49 +1,54 @@
 use secrecy::{Secret, ExposeSecret};
-use std::sync::{Mutex, Arc};
-use lazy_static::lazy_static;
+use std::sync::atomic::{AtomicPtr, Ordering};
+use std::ptr;
 
-lazy_static! {
-    static ref SECRET_REGISTRY: Mutex<Vec<Box<dyn Fn() + Send + Sync>>> = Mutex::new(Vec::new());
-}
+const MAX_SECRETS: usize = 64;
+const INIT_PTR: AtomicPtr<Secret<[u8; 32]>> = AtomicPtr::new(ptr::null_mut());
+static SECRET_REGISTRY: [AtomicPtr<Secret<[u8; 32]>>; MAX_SECRETS] = [INIT_PTR; MAX_SECRETS];
 
 pub struct SecureSecret {
     #[allow(dead_code)]
-    inner: Arc<Mutex<Secret<[u8; 32]>>>,
+    inner: Box<Secret<[u8; 32]>>,
+    registry_index: Option<usize>,
 }
 
 impl SecureSecret {
     pub fn new(initial_data: [u8; 32]) -> Self {
-        let inner = Arc::new(Mutex::new(Secret::new(initial_data)));
-        let weak_inner = Arc::downgrade(&inner);
-
-        if let Ok(mut registry) = SECRET_REGISTRY.lock() {
-            registry.push(Box::new(move || {
-                if let Some(strong_inner) = weak_inner.upgrade() {
-                    if let Ok(mut secret) = strong_inner.lock() {
-                        *secret = Secret::new([0u8; 32]);
-                    }
-                }
-            }));
+        let mut inner = Box::new(Secret::new(initial_data));
+        let ptr: *mut Secret<[u8; 32]> = &mut *inner;
+        
+        let mut registry_index = None;
+        for (i, atomic_ptr) in SECRET_REGISTRY.iter().enumerate() {
+            if atomic_ptr.compare_exchange(ptr::null_mut(), ptr, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+                registry_index = Some(i);
+                break;
+            }
         }
 
-        Self { inner }
+        Self { inner, registry_index }
     }
 
     #[allow(dead_code)]
     pub fn expose(&self) -> [u8; 32] {
-        if let Ok(secret) = self.inner.lock() {
-            *secret.expose_secret()
-        } else {
-            [0u8; 32]
+        *self.inner.expose_secret()
+    }
+}
+
+impl Drop for SecureSecret {
+    fn drop(&mut self) {
+        if let Some(idx) = self.registry_index {
+            SECRET_REGISTRY[idx].store(ptr::null_mut(), Ordering::SeqCst);
         }
     }
 }
 
 pub fn wipe_all_registered_secrets() {
-    if let Ok(mut registry) = SECRET_REGISTRY.lock() {
-        for wipe_fn in registry.iter() {
-            wipe_fn();
+    for atomic_ptr in &SECRET_REGISTRY {
+        let ptr = atomic_ptr.swap(ptr::null_mut(), Ordering::SeqCst);
+        if !ptr.is_null() {
+            unsafe {
+                *ptr = Secret::new([0u8; 32]);
+            }
         }
-        registry.clear();
     }
 }

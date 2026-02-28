@@ -16,9 +16,19 @@ pub fn isolate_environment() {
             process::exit(1);
         }
 
-        fs::write("/proc/self/setgroups", "deny").ok();
-        fs::write("/proc/self/uid_map", format!("0 {} 1", uid)).ok();
-        fs::write("/proc/self/gid_map", format!("0 {} 1", gid)).ok();
+        fs::write("/proc/self/setgroups", b"deny").ok();
+
+        let mut uid_buf = [0u8; 64];
+        let mut uid_cursor = std::io::Cursor::new(&mut uid_buf[..]);
+        std::io::Write::write_fmt(&mut uid_cursor, format_args!("0 {} 1", uid)).ok();
+        let uid_len = uid_cursor.position() as usize;
+        fs::write("/proc/self/uid_map", &uid_buf[..uid_len]).ok();
+
+        let mut gid_buf = [0u8; 64];
+        let mut gid_cursor = std::io::Cursor::new(&mut gid_buf[..]);
+        std::io::Write::write_fmt(&mut gid_cursor, format_args!("0 {} 1", gid)).ok();
+        let gid_len = gid_cursor.position() as usize;
+        fs::write("/proc/self/gid_map", &gid_buf[..gid_len]).ok();
 
         let root = CString::new("/").unwrap();
         if mount(

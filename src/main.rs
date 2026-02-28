@@ -18,8 +18,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     watchdog::secure_launch(|| {
         namespace::isolate_environment();
         memory::lock_memory().map_err(|e| format!("{:?}", e))?;
-        signals::install_signal_handlers();
         seccomp::apply_filters();
+        signals::install_signal_handlers();
         let _session_key = SecureSecret::new([0x39u8; 32]);
 
         println!("{}", obfstr!("kr-see: Secure Environment Active:"));
