@@ -31,7 +31,7 @@ where
                 waitpid(child_process_id, &mut child_execution_status, 0);
 
                 if WIFEXITED(child_execution_status) {
-                    process::exit(WEXITSTATUS(child_execution_status));
+                    crate::core::shutdown::secure_shutdown(WEXITSTATUS(child_execution_status));
                 }
 
                 if WIFSIGNALED(child_execution_status) {
@@ -39,12 +39,12 @@ where
                         "\n[!] Watchdog Alert: Child terminated by signal {}",
                         WTERMSIG(child_execution_status)
                     );
-                    process::exit(1);
+                    crate::core::shutdown::secure_shutdown(1);
                 }
 
                 if ptrace(PTRACE_CONT, child_process_id, 0, 0) < 0 {
                     kill(child_process_id, SIGKILL);
-                    process::exit(1);
+                    crate::core::shutdown::secure_shutdown(1);
                 }
             }
         }

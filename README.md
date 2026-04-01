@@ -1,142 +1,71 @@
-# KR-SEE
+# Amnesic: Transparent Secure Command Wrapper
 
+Amnesic is a high-assurance, identity-isolated command wrapper designed to protect sensitive process execution. It transforms a target binary into a secure "Worker" supervised by an "Amnesic Supervisor" that enforces strict security invariants in physical RAM.
 
+## Core Security Invariants
 
-KR-SEE should not be read as a traditional program or framework. It is better understood as a **state machine** whose behavior is constrained by a small set of non-negotiable **security invariants**. Every line of code exists only to preserve these invariants. If any invariant is violated, the system intentionally destroys its own state.
+### 1. Observer Invariant (Ptrace Cloaking)
 
-At a high level, the system state can be described as a tuple:
+Amnesic operates on a **Supervisor-Worker** model. Upon execution, the process forks. The Parent (Supervisor) immediately attaches to the Child (Worker) as a tracer. This occupies the sole Linux tracer slot, preventing external debuggers (`gdb`, `strace`) from attaching to the sensitive session.
 
-```
-Σ = (I, P, E, F)
-```
+### 2. Physical Boundary Invariant (mlockall)
 
-Where:
+Amnesic invokes `mlockall(MCL_CURRENT | MCL_FUTURE)` before yielding control to the target command. This pins all session memory to physical RAM, preventing the OS from swapping sensitive data to persistent disk storage.
 
-* **I** — Isolation (who can observe or influence the process)
-* **P** — Persistence (where secrets are allowed to exist)
-* **E** — Entropy (whether secret data remains recoverable)
-* **F** — Failure state (what happens when assumptions break)
+### 3. Attack Surface Reduction (Seccomp Jail)
 
-The system is considered *secure* only while all invariants hold simultaneously.
+The Worker process is confined within a "Functional-Minimum" Seccomp whitelist. It permits only the necessary syscalls for networking (e.g., `socket`, `connect`, `sendmsg`) and process execution (`execve`), trapping all unauthorized kernel interactions.
 
----
+### 4. Zero-Persistence Registry
 
-## 1. Observer Invariant — Tracer Occupancy
-
-KR-SEE enforces a strict rule: a protected process must be observable only by itself.
-
-On Linux, any process `P` may have at most one tracer:
-
-```
-|Tracers(P)| ≤ 1
-```
-
-KR-SEE exploits this kernel property directly. A supervisor process `S` attaches to the protected process `C` at startup:
-
-```
-ptrace(S, C)
-```
-
-By occupying the sole tracer slot, KR-SEE creates a physical impossibility for a second observer (e.g., GDB, strace) to attach. The watchdog thread exists only to maintain this occupancy over time.
-
-If at any point the tracer relationship is lost, the invariant is violated and the system transitions immediately to failure.
+All sensitive buffers are tracked in a global registry. Upon worker termination (or any interruption signal), the Supervisor performs a volatile memory wipe, physically overwriting secret data before the process dissolves.
 
 ---
 
-## 2. Physical Boundary Invariant — RAM vs Disk
+## Installation & Usage
 
-Secrets are not treated as abstract values. Their *location* matters.
+### Build
 
-Let:
-
-* **R** = volatile physical memory (RAM)
-* **D** = persistent storage (disk, swap)
-* **K** = a secret key
-
-In a standard operating system, memory pages may migrate:
-
-```
-K ∈ R → K ∈ D
+```bash
+cargo build --release
 ```
 
-KR-SEE forbids this transition. By locking memory pages, it enforces the locality constraint:
+### Direct Execution
 
-```
-K ∈ R ∧ K ∉ D
+Wrap any command to run it inside the Amnesic sandbox:
+
+```bash
+./target/release/amnesic ls -la
+./target/release/amnesic curl -I https://google.com
 ```
 
-The existence of a secret is therefore tied directly to silicon voltage. When power is removed, the system state collapses into entropy. No disk image, swap file, or hibernation snapshot can contain recoverable material.
+### Interactive Dashboard
+
+Run without arguments to launch the secure CLI dashboard:
+
+```bash
+    ./target/release/amnesic
+```
 
 ---
 
-## 3. Attack Surface Reduction — Syscall Filtering
+## Project Structure
 
-Rather than trusting correct behavior, KR-SEE reduces the number of *possible* behaviors.
-
-Let **S** be the set of all Linux system calls, and **A** the allowed subset:
-
-```
-A ⊂ S
-```
-
-In practice:
-
-```
-|A| ≈ 40–50
-```
-
-Any attempt to invoke a syscall outside this set results in an immediate transition to the failure state. The reduction factor is substantial:
-
-```
-Reduction = 1 − |A| / |S|
-```
-
-This sharply limits the space of usable kernel gadgets, even if code execution is achieved.
+- **`src/cli/`**: Interactive dashboard and terminal UI.
+- **`src/core/`**: Critical lifecycle management and secret registry.
+  - `shutdown.rs`: Destructive cleanup and entropy collapse.
+  - `secrets/`: Volatile buffer management.
+- **`src/sandbox/`**: Linux-specific hardening primitives.
+  - `seccomp.rs`: Syscall filtering and networking whitelist.
+  - `namespace.rs`: Filesystem and identity isolation.
+  - `watchdog.rs`: Supervisor process and ptrace cloaking.
+  - `memory.rs`: Physical RAM locking.
 
 ---
 
-## 4. Entropy Invariant — Destructive Shutdown
+## Invariant Summary
 
-Deletion is not considered secure unless information entropy is destroyed.
-
-For a secret `K`, define its entropy over time `H(K_t)`. At shutdown time `t_end`, KR-SEE enforces:
-
-```
-lim(t → t_end) H(K_t) = 0
-```
-
-Secrets are registered explicitly. On any failure or termination signal, each registered destructor is executed, physically overwriting memory via volatile writes and memory barriers.
-
-This is not logical cleanup. It is intentional entropy collapse.
-
----
-
-## 5. Identity Isolation — Namespace Mapping
-
-KR-SEE separates *perceived authority* from *actual authority*.
-
-Let:
-
-* `uid_in` = user ID inside the isolated environment
-* `uid_out` = corresponding host user ID
-
-A mapping function is defined:
-
-```
-f(uid_in) = uid_out
-```
-
-By mapping an internal root identity to an unprivileged host identity, the system allows internal administration (mounts, tmpfs, setup) while mathematically proving zero authority over host resources.
-
----
-
-## System Closure
-
-KR-SEE forms a closed system:
-
-* **Inflow:** strictly filtered syscalls
-* **Outflow:** no disk persistence, no memory dumps
-* **Observation:** blocked by tracer exclusivity
-* **Termination:** destructive by design
-
-
+- **Inflow:** Strictly whitelisted syscalls.
+- **Outflow:** Zero disk persistence; No core dumps.
+- **Observation:** Blocked by tracer occupancy.
+- **Termination:** Destructive wipe by design.

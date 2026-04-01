@@ -1,17 +1,34 @@
-mod hardening;
-mod secrets;
-mod shutdown;
+mod cli;
+mod core;
+mod sandbox;
 
-use hardening::{memory, dump, signals, anti_debug, input, seccomp, namespace, watchdog};
-use secrets::secret::SecureSecret;
+use crate::cli::{interactive_menu, DashboardResult};
+use crate::core::secrets::secret::SecureSecret;
+use crate::core::shutdown;
+use crate::sandbox::{anti_debug, dump, memory, namespace, seccomp, signals, watchdog};
+use std::os::unix::process::CommandExt;
 use std::panic;
-use obfstr::obfstr;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    panic::set_hook(Box::new(|_| {
-        eprintln!("\n{}", obfstr!("[CRITICAL] Panic detected! Executing emergency wipe."));
-        shutdown::secure_shutdown();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+
+    let target_args = if args.is_empty() {
+        match interactive_menu()? {
+            DashboardResult::Execute(cmd_args) => cmd_args,
+            DashboardResult::Exit => return Ok(()),
+        }
+    } else {
+        args
+    };
+
+    panic::set_hook(Box::new(|info| {
+        eprintln!(
+            "\n[CRITICAL] Panic detected! {:?}\nExecuting emergency wipe.",
+            info
+        );
+        shutdown::secure_shutdown(1);
     }));
+
     anti_debug::block_debugger();
     dump::disable_core_dumps();
 
@@ -20,47 +37,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         memory::lock_memory().map_err(|e| format!("{:?}", e))?;
         seccomp::enforce_syscall_boundaries();
         signals::install_signal_handlers();
+
         let _session_key = SecureSecret::new([0x39u8; 32]);
 
-        println!("{}", obfstr!("brzkh: Secure Environment Active:"));
-        if let Err(e) = run_shell() {
-            eprintln!("[!] Shell Error: {}", e);
-            shutdown::secure_shutdown();
+        let mut cmd = std::process::Command::new(&target_args[0]);
+        if target_args.len() > 1 {
+            cmd.args(&target_args[1..]);
         }
 
-        Ok(())
+        let err = cmd.exec();
+        Err(Box::new(err))
     });
 
-    Ok(())
-}
-
-fn run_shell() -> Result<(), Box<dyn std::error::Error>> {
-    loop {
-        let command = input::secure_prompt(obfstr!("bzk $"));
-
-        match command.as_str() {
-            c if c == obfstr!("status") => {
-                let internal_uid = unsafe { libc::getuid() };
-
-                println!("\n--- Security Status ---");
-                println!("{:<20} {}", obfstr!("[*] Memory:"), obfstr!("LOCKED (mlockall)"));
-                println!("{:<20} {}", obfstr!("[*] Ptrace:"), obfstr!("ACTIVE (Parent-Child Tracer)"));
-                println!("{:<20} {}", obfstr!("[*] Dumps:"), obfstr!("DISABLED"));
-                println!("{:<20} {}", obfstr!("[*] Namespace:"), obfstr!("ACTIVE (User + Mount)"));
-                println!("{:<20} {} (Mapped Root)", obfstr!("[*] Internal UID:"), internal_uid);
-                println!("{:<20} {}", obfstr!("[*] Seccomp:"), obfstr!("ACTIVE (Trap Mode)"));
-                println!("------------------------\n");
-            },
-            c if c == obfstr!("exit") || c == obfstr!("quit") => {
-                println!("{}", obfstr!("Wiping memory and exiting..."));
-                shutdown::secure_shutdown();
-                break;
-            },
-            "" => continue,
-            _ => {
-                println!("{}", obfstr!("Unknown command."));
-            }
-        }
-    }
     Ok(())
 }

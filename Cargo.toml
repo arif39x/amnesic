@@ -1,5 +1,5 @@
 [package]
-name = "brzkh"
+name = "amnesic"
 version = "0.1.0"
 edition = "2021"
 
@@ -13,6 +13,8 @@ lazy_static = "1.4"
 rpassword = "7.0"
 obfstr = "0.4"
 subtle = "2.4"
+dialoguer = "0.11"
+console = "0.15"
 
 [profile.release]
 panic = "abort"
